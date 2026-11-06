@@ -54,3 +54,5 @@ This project is licensed under the [PolyForm Noncommercial License 1.0.0](https:
 Use, modification, and redistribution are permitted for noncommercial purposes under the terms of the license. Commercial use requires separate written permission from the copyright holder.
 
 For commercial licensing inquiries, please contact the copyright holder.
+
+**Team / enterprise licensing:** [contact us](https://github.com/claushorn/memguard/issues/new?title=Team%20%2F%20enterprise%20licensing%20inquiry).
