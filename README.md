@@ -1,10 +1,10 @@
-# Memguard
+<p align="center"><img src="assets/memguard_logo.png" alt="memguard — Resource management for autonomous AI agents" width="720"></p>
 
 **The resource manager for autonomous AI agents on macOS.**
 
 Running several AI agents on one Mac can bring it down. Each agent starts its own jobs: model inference, structure prediction, data processing. Together they can use up all the memory, and the Mac freezes or restarts. memguard stops that from happening.
 
-It watches every job on your Mac, **including GPU memory that Activity Monitor doesn't show**. When memory runs low, it tells the agent responsible so the agent can shrink its job. If that doesn't help, memguard pauses the largest job and resumes it once memory frees up. A job is killed only as a last resort.
+It watches every job on your Mac, **including GPU memory that Activity Monitor doesn't show**. When memory runs low, it **tells the agent responsible** so the agent can shrink its job. If that doesn't help, memguard pauses the largest job and resumes it once memory frees up. A job is killed only as a last resort.
 
 **Nothing to configure. No changes to your agents.** Install it once and it runs in the background.
 
@@ -49,10 +49,4 @@ Open the disk image again and double-click **Uninstall memguard**.
 
 ## License
 
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0.txt).
-
-Use, modification, and redistribution are permitted for noncommercial purposes under the terms of the license. Commercial use requires separate written permission from the copyright holder.
-
-For commercial licensing inquiries, please contact the copyright holder.
-
-<!-- **Team / enterprise licensing:** [contact us](https://github.com/memguard-agent/memguard/issues/new?title=Team%20%2F%20enterprise%20licensing%20inquiry). -->
+memguard is licensed under the [Apache License 2.0](LICENSE).
