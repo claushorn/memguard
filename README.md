@@ -1,4 +1,4 @@
-# memguard
+# Memguard
 
 **The resource manager for autonomous AI agents on macOS.**
 
