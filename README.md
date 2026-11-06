@@ -28,7 +28,7 @@ One daemon, launched by launchd, samples free memory every 3 s and reads the mem
 | < 2 GB | **Pause the largest job immediately**. If one is already paused and memory is still under 2 GB, **kill it** |
 | ≥ 6 GB for 3 samples | **Resume** the paused job (`SIGCONT`) |
 
-- **The agent reads the warning.** Claude Code passes its session ID down to every job it starts, even background jobs. memguard uses it to find the agent that owns a job and puts the warning into that agent's context, through a Claude Code hook, on the agent's next step. The agent is told that its job is using a lot of memory, how long it has until the job is paused, and how to reduce it (smaller batch, fewer workers, freeing GPU tensors). It is also told when the job is paused, resumed or killed. This works whether or not the job has a terminal.
+- **The agent reads the warning.** Claude Code passes its session ID down to every job it starts, even background jobs. memguard uses it to find the agent that owns a job and puts the warning into that agent's context, through a Claude Code hook, at the agent's next tool call or prompt. The agent is told that its job is using a lot of memory, how long it has until the job is paused, and how to reduce it (smaller batch, fewer workers, freeing GPU tensors). It is also told when the job is paused, resumed or killed. This works whether or not the job has a terminal. An agent that is idle, with its turn ended while a background job keeps running, gets the message when it next acts; until then the desktop notification reaches you.
 - **The agent is never the target.** Killing an agent loses its context and leaves its runaway job running, so memguard targets the agent's child jobs. The `claude` CLI is protected by default. For other agent CLIs and for services that must never stall, add them to the exemption file.
 - **It shows who uses the memory.** Jobs are grouped by the terminal window of the agent that started them, with its Claude Code task title (titles are read from Terminal.app). Background jobs whose launcher has exited are listed as `detached`.
 - **Only one job is paused at a time.** Several jobs peaking together are time-sliced instead of crashing the machine together.
@@ -47,7 +47,7 @@ launchctl list | grep memwatch       # check that it is running
 tail -f logs/memwatch.log            # see what it does
 ```
 
-`install_agent_hook.sh` adds a hook to `~/.claude/settings.json` (a backup is kept as `settings.json.bak`). Sessions that are already running pick it up when Claude Code reloads its settings; check with `/hooks`.
+`install_agent_hook.sh` adds a hook to `~/.claude/settings.json` (a backup is kept as `settings.json.bak`). Running sessions pick it up automatically, with no restart needed. To check, open `/hooks` in a session: **PostToolUse** and **UserPromptSubmit** should list `memguard.agent_hook`.
 
 Uninstall: `tools/install_memwatch.sh --uninstall` and `tools/install_agent_hook.sh --uninstall`.
 
