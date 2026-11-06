@@ -16,8 +16,6 @@ say()  { [ $YES = 1 ] && { echo "$1"; return; }; osascript -e "display dialog \"
 ask()  { [ $YES = 1 ] && return 0; osascript -e "display dialog \"$1\" buttons {\"No\", \"Yes\"} default button 2 with title \"memguard\"" 2>/dev/null | grep -q "Yes"; }
 fail() { echo "ERROR: $1"; [ $YES = 1 ] || osascript -e "display dialog \"Installation failed: $1\n\nDetails: $LOG\" buttons {\"OK\"} with title \"memguard\" with icon stop" >/dev/null; exit 1; }
 
-[ "$(uname -m)" = "arm64" ] || fail "memguard needs a Mac with Apple Silicon."
-
 ask "Install memguard?\n\nIt runs a small background watchdog that stops AI agents' jobs from exhausting this Mac's memory (pauses the largest job before the machine crashes)." || exit 0
 
 # uv provides Python and the one dependency (psutil). Apps start with a minimal PATH.

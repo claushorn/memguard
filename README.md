@@ -10,11 +10,11 @@ It watches every job on your Mac, **including GPU memory that Activity Monitor d
 
 ## Install
 
-1. Download the latest **memguard .dmg** from [Releases](https://github.com/claushorn/memguard/releases).
+1. Download the latest **memguard .dmg** from [Releases](https://github.com/memguard-agent/memguard/releases).
 2. Open it and double-click **Install memguard**.
 3. Answer the questions. That's it.
 
-Requires a Mac with Apple Silicon (M1 or later). Tested on macOS 26.5.
+Requires macOS. Tested on macOS 26.5.
 
 ## What you'll notice
 
@@ -55,4 +55,4 @@ Use, modification, and redistribution are permitted for noncommercial purposes u
 
 For commercial licensing inquiries, please contact the copyright holder.
 
-<!-- **Team / enterprise licensing:** [contact us](https://github.com/claushorn/memguard/issues/new?title=Team%20%2F%20enterprise%20licensing%20inquiry). -->
+<!-- **Team / enterprise licensing:** [contact us](https://github.com/memguard-agent/memguard/issues/new?title=Team%20%2F%20enterprise%20licensing%20inquiry). -->
