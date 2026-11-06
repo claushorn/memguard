@@ -65,6 +65,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
+from memguard import _inbox
+
 GB = 1024.0 ** 3
 
 # ---------------------------------------------------------------------------
@@ -497,11 +499,17 @@ def pick_victim(procs: list[ProcInfo]) -> Optional[ProcInfo]:
 # ---------------------------------------------------------------------------
 # Notification
 # ---------------------------------------------------------------------------
-def notify(title: str, message: str, tty: str = "", dry_run: bool = False) -> None:
-    """Desktop notification, plus a line in the responsible session's OWN terminal.
+def notify(title: str, message: str, tty: str = "", dry_run: bool = False,
+           pid: Optional[int] = None) -> None:
+    """Tell everyone who must know: the human and, when `pid` was started by an AI
+    agent, the AGENT itself.
 
-    Writing into the offending tty closes the feedback loop that is missing today: the
-    agent that caused the pressure sees the consequence in its own window, as it happens.
+    - Desktop notification and the daemon log, for the human.
+    - A line in the job's own terminal, when it has one. This is visible on screen
+      only; an agent never reads its terminal's display.
+    - The agent's inbox (`memguard._inbox`), when `pid` carries an agent session id.
+      `memguard.agent_hook` delivers it into the agent's context on its next step, so
+      the agent can shrink its job before memwatch suspends it.
 
     Under dry_run this stays on THIS process's stdout and touches nothing else: telling
     another agent its job was suspended when it was not would be a lie, and a dry run
@@ -525,7 +533,11 @@ def notify(title: str, message: str, tty: str = "", dry_run: bool = False) -> No
                 handle.write(f"\n\033[1;31m[memwatch] {title}: {message}\033[0m\n")
         except OSError:
             pass
-    print(f"[memwatch] {title}: {message}", flush=True)
+    session = _inbox.session_of(pid) if pid is not None else None
+    if session is not None:
+        _inbox.post(session, f"{title}: {message}")
+    print(f"[memwatch] {title}: {message}"
+          + (f"  -> agent session {session}" if session else ""), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -684,13 +696,19 @@ def run_daemon(dry_run: bool = False) -> int:
                 action = decide_action(free_gb, state)
 
                 if action == "resume":
+                    notify("RESUMED your job",
+                           f"pid {state.stopped_pid} continues; box has {free_gb:.1f} GB "
+                           f"free again.",
+                           dry_run=dry_run, pid=state.stopped_pid)
                     _signal_pid(state.stopped_pid, signal.SIGCONT, "resumed", dry_run)
                     state.stopped_pid, state.recovered_samples = None, 0
 
                 elif action == "kill":
                     notify("KILLING suspended job",
-                           f"free {free_gb:.1f} GB still critical; pid {state.stopped_pid}",
-                           dry_run=dry_run)
+                           f"pid {state.stopped_pid}: free memory {free_gb:.1f} GB is under "
+                           f"the {KILL_FREE_GB:.1f} GB kill threshold even with it "
+                           f"suspended. Rerun it with less memory.",
+                           dry_run=dry_run, pid=state.stopped_pid)
                     _signal_pid(state.stopped_pid, signal.SIGKILL, "killed", dry_run)
                     state.stopped_pid, state.recovered_samples = None, 0
 
@@ -720,6 +738,7 @@ def run_daemon(dry_run: bool = False) -> int:
                                 f"SUSPENDED in ~{grace_s:.0f}s if memory is still low.",
                                 tty=tty,
                                 dry_run=dry_run,
+                                pid=victim.pid,
                             )
                         state.warned_pid = victim.pid
                         state.warned_samples = 0
@@ -757,6 +776,7 @@ def run_daemon(dry_run: bool = False) -> int:
                             f"It resumes automatically when the box drains.",
                             tty=tty,
                             dry_run=dry_run,
+                            pid=victim.pid,
                         )
                         _signal_pid(victim.pid, signal.SIGSTOP, "suspended", dry_run)
                         state.stopped_pid = victim.pid

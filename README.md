@@ -1,8 +1,8 @@
 # memguard
 
-**The missing resource manager for autonomous AI agents on macOS.**
+**The resource manager for autonomous AI agents on macOS.**
 
-memguard protects your Mac from memory exhaustion caused by multiple independent AI agents. It covers RAM and GPU (Metal) memory, which share one pool on Apple Silicon. It supervises every agent's workloads across the whole machine and steps in before memory pressure turns into a kernel panic. It pauses a job first and kills only as a last resort.
+memguard protects your Mac from memory exhaustion caused by multiple independent AI agents, including GPU (Metal) memory that ordinary tools can't see. It supervises every agent's workloads across the whole machine and **tells the agent responsible**, so the agent can shrink its job before memguard has to pause it. It pauses a job first and kills only as a last resort.
 
 **No agent changes. No library imports. No scheduler.** Install it once and it runs alongside your agents.
 
@@ -19,15 +19,16 @@ Apple Silicon makes this hard to see. Metal/MPS allocations **do not appear in R
 
 ## How it works
 
-One daemon, launched by launchd, samples free memory every 3 s and reads the committed footprint (`phys_footprint`) of **every** process. This value includes Metal memory. A full scan of about 500 processes takes about 2 ms.
+One daemon, launched by launchd, samples free memory every 3 s and reads the memory footprint of **every** process, including its GPU memory. A full scan of about 500 processes takes about 2 ms.
 
 | Free memory (default) | Action |
 |---|---|
 | < 6 GB | **Warn:** macOS notification and a log line |
-| < 3.5 GB | **Warn the largest job**, then **pause it** (`SIGSTOP`) about 27 s later if memory is still low |
+| < 3.5 GB | **Warn the agent that owns the largest job**, then **pause the job** (`SIGSTOP`) about 27 s later if memory is still low |
 | < 2 GB | **Pause the largest job immediately**. If one is already paused and memory is still under 2 GB, **kill it** |
 | ≥ 6 GB for 3 samples | **Resume** the paused job (`SIGCONT`) |
 
+- **The agent reads the warning.** Claude Code passes its session ID down to every job it starts, even background jobs. memguard uses it to find the agent that owns a job and puts the warning into that agent's context, through a Claude Code hook, on the agent's next step. The agent is told that its job is using a lot of memory, how long it has until the job is paused, and how to reduce it (smaller batch, fewer workers, freeing GPU tensors). It is also told when the job is paused, resumed or killed. This works whether or not the job has a terminal.
 - **The agent is never the target.** Killing an agent loses its context and leaves its runaway job running, so memguard targets the agent's child jobs. The `claude` CLI is protected by default. For other agent CLIs and for services that must never stall, add them to the exemption file.
 - **It shows who uses the memory.** Jobs are grouped by the terminal window of the agent that started them, with its Claude Code task title (titles are read from Terminal.app). Background jobs whose launcher has exited are listed as `detached`.
 - **Only one job is paused at a time.** Several jobs peaking together are time-sliced instead of crashing the machine together.
@@ -35,17 +36,20 @@ One daemon, launched by launchd, samples free memory every 3 s and reads the com
 
 ## Install
 
-Requirements: macOS on Apple Silicon and [uv](https://docs.astral.sh/uv/). Tested on macOS 26.5 with an M4 Pro. Intel Macs are untested, and Linux and NVIDIA GPUs are not supported.
+Requirements: macOS on Apple Silicon and [uv](https://docs.astral.sh/uv/). Tested on macOS 26.5 with an M4 Pro.
 
 ```bash
 git clone https://github.com/claushorn/memguard.git
 cd memguard
 tools/install_memwatch.sh            # install and start the launchd agent (survives reboots)
+tools/install_agent_hook.sh          # let Claude Code agents receive memguard's warnings
 launchctl list | grep memwatch       # check that it is running
 tail -f logs/memwatch.log            # see what it does
 ```
 
-Uninstall: `tools/install_memwatch.sh --uninstall`.
+`install_agent_hook.sh` adds a hook to `~/.claude/settings.json` (a backup is kept as `settings.json.bak`). Sessions that are already running pick it up when Claude Code reloads its settings; check with `/hooks`.
+
+Uninstall: `tools/install_memwatch.sh --uninstall` and `tools/install_agent_hook.sh --uninstall`.
 
 ## Use
 
@@ -99,10 +103,6 @@ tools/install_memguard.sh /path/to/project/.venv     # --check / --uninstall
 ```
 
 To allow a whole-file load that is genuinely needed: `with memguard.full_load_allowed("why", est_gb=4): ...`
-
-## Roadmap
-
-- **Feedback the agent can read.** Today a warning reaches the human, through a desktop notification, the log, and the job's terminal if it has one. It does not reach the LLM agent's input. The next step is a Claude Code hook that puts "your job is using 20 GB and will be paused" into the agent's context, so the agent can lower its batch size before it is paused.
 
 ## Development
 

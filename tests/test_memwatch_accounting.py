@@ -292,7 +292,7 @@ class TestWarnBeforeStop:
         monkeypatch.setattr(memwatch, "measure_footprints", lambda procs: None)
         monkeypatch.setattr(memwatch, "resolve_ttys", lambda procs: {victim_pid: "ttys999"})
         monkeypatch.setattr(memwatch, "notify",
-                            lambda title, message, tty="", dry_run=False:
+                            lambda title, message, tty="", dry_run=False, pid=None:
                                 notifications.append((title, message)))
         monkeypatch.setattr(memwatch, "_signal_pid",
                             lambda pid, sig, verb, dry_run=False: signaled.append((pid, sig)))
@@ -495,7 +495,7 @@ class TestWarnBeforeStop:
         monkeypatch.setattr(memwatch, "measure_footprints", lambda procs: None)
         monkeypatch.setattr(memwatch, "resolve_ttys", lambda procs: {77: "ttys999"})
         monkeypatch.setattr(memwatch, "notify",
-                            lambda title, message, tty="", dry_run=False:
+                            lambda title, message, tty="", dry_run=False, pid=None:
                                 notifications.append((title, message)))
         monkeypatch.setattr(memwatch, "_signal_pid",
                             lambda pid, sig, verb, dry_run=False: signaled.append((pid, sig)))
@@ -560,7 +560,7 @@ class TestWarnBeforeStop:
         monkeypatch.setattr(memwatch, "resolve_ttys",
                             lambda procs: {77: "ttys999", 88: "ttys998"})
         monkeypatch.setattr(memwatch, "notify",
-                            lambda title, message, tty="", dry_run=False:
+                            lambda title, message, tty="", dry_run=False, pid=None:
                                 notifications.append((title, message)))
         monkeypatch.setattr(memwatch, "_signal_pid", lambda *a, **k: None)
         monkeypatch.setattr(memwatch, "_other_daemon_pids", lambda: [])
@@ -682,7 +682,7 @@ class TestWarnBeforeStop:
         monkeypatch.setattr(memwatch, "resolve_ttys",
                             lambda procs: {77: "ttys999", 88: "ttys998"})
         monkeypatch.setattr(memwatch, "notify",
-                            lambda title, message, tty="", dry_run=False:
+                            lambda title, message, tty="", dry_run=False, pid=None:
                                 notifications.append((title, message)))
         monkeypatch.setattr(memwatch, "_signal_pid",
                             lambda pid, sig, verb, dry_run=False: signaled.append((pid, sig)))
@@ -741,7 +741,7 @@ class TestWarnBeforeStop:
         monkeypatch.setattr(memwatch, "measure_footprints", lambda procs: None)
         monkeypatch.setattr(memwatch, "resolve_ttys", lambda procs: {77: "ttys999"})
         monkeypatch.setattr(memwatch, "notify",
-                            lambda title, message, tty="", dry_run=False:
+                            lambda title, message, tty="", dry_run=False, pid=None:
                                 notifications.append((title, message)))
         monkeypatch.setattr(memwatch, "_signal_pid",
                             lambda pid, sig, verb, dry_run=False: signaled.append(sig))
