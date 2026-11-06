@@ -13,6 +13,18 @@ When several agents (Claude Code, Codex, Cursor, …) work on one machine, each 
 
 macOS only. Requires [uv](https://docs.astral.sh/uv/).
 
+## Why memguard?
+
+Most memory tools for ML protect **one** process from itself. They run inside a training script and shrink its batch size. That cannot help when the danger is many independent agents, each running throwaway scripts that no library will ever be imported into. memguard is built for that case:
+
+- **No cooperation needed.** It is a single daemon outside every workload. Nothing has to be imported, configured or changed in the agents.
+- **It measures GPU memory correctly on Apple Silicon.** RSS-based tools (`ps`, psutil) do not count Metal/MPS memory, so they pick the wrong job or none. memguard reads every process's committed `phys_footprint`.
+- **It knows about agents.** Jobs are grouped by the terminal window and task of the agent that started them. The agent process itself is never targeted, because killing an agent loses its context and leaves its runaway job running. Its child jobs are the targets.
+- **It closes the loop with the agent.** The warning goes into the responsible agent's own terminal, which is the agent's input. An agent can read it and reduce its job, for example by lowering the batch size, before it is paused.
+- **It pauses before it kills.** When several jobs peak at once, they are paused and resumed one at a time instead of crashing the machine together. A job is killed only if free memory falls below the kill threshold.
+
+Supervisors for whole process trees under memory pressure exist on Linux (systemd-oomd, earlyoom). memguard brings the idea to macOS with Apple Silicon, aware of AI agents and measuring their GPU memory correctly.
+
 ## Install
 
 ```bash
