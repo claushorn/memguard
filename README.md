@@ -2,119 +2,50 @@
 
 **The resource manager for autonomous AI agents on macOS.**
 
-memguard protects your Mac from memory exhaustion caused by multiple independent AI agents, including GPU (Metal) memory that ordinary tools can't see. It supervises every agent's workloads across the whole machine and **tells the agent responsible**, so the agent can shrink its job before memguard has to pause it. It pauses a job first and kills only as a last resort.
+Running several AI agents on one Mac can bring it down. Each agent starts its own jobs: model inference, structure prediction, data processing. Together they can use up all the memory, and the Mac freezes or restarts. memguard stops that from happening.
 
-**No agent changes. No library imports. No scheduler.** Install it once and it runs alongside your agents.
+It watches every job on your Mac, **including GPU memory that Activity Monitor doesn't show**. When memory runs low, it tells the agent responsible so the agent can shrink its job. If that doesn't help, memguard pauses the largest job and resumes it once memory frees up. A job is killed only as a last resort.
 
-## Why
-
-Coding agents such as Claude Code launch Python scripts, model inference and structure predictions, often several at once and often in the background. They don't know what the other agents are doing. Three jobs can each fit comfortably in memory and still exhaust the machine together.
-
-Apple Silicon makes this hard to see. Metal/MPS allocations **do not appear in RSS**, so `ps`, Activity Monitor's default columns and psutil-based tools all miss them. Two measurements:
-
-- A PyTorch job holding a 2 GB MPS tensor showed 0.10 GB RSS.
-- A `boltz predict` run holding **20.7 GB** showed **7.8 MB** RSS.
-
-**The incident behind this project:** a 24 GB M4 Pro running several agents kernel-panicked when memory ran out. At the moment of the panic it had 905 free pages and low swap space. Three Python jobs held about 24 GB between them, and 10.5 GB of the memory was wired, so it could not be swapped out.
-
-## How it works
-
-One daemon, launched by launchd, samples free memory every 3 s and reads the memory footprint of **every** process, including its GPU memory. A full scan of about 500 processes takes about 2 ms.
-
-| Free memory (default) | Action |
-|---|---|
-| < 6 GB | **Warn:** macOS notification and a log line |
-| < 3.5 GB | **Warn the agent that owns the largest job**, then **pause the job** (`SIGSTOP`) about 27 s later if memory is still low |
-| < 2 GB | **Pause the largest job immediately**. If one is already paused and memory is still under 2 GB, **kill it** |
-| ≥ 6 GB for 3 samples | **Resume** the paused job (`SIGCONT`) |
-
-- **The agent reads the warning.** Claude Code passes its session ID down to every job it starts, even background jobs. memguard uses it to find the agent that owns a job and puts the warning into that agent's context, through a Claude Code hook. The agent is told that its job is using a lot of memory, how long it has until the job is paused, and how to reduce it (smaller batch, fewer workers, freeing GPU tensors). It is also told when the job is paused, resumed or killed. This works whether or not the job has a terminal. An agent that is idle, with its turn ended while a background job keeps running, gets the message when it next acts; until then the desktop notification reaches you.
-- **The agent is never the target.** Killing an agent loses its context and leaves its runaway job running, so memguard targets the agent's child jobs. The `claude` CLI is protected by default. For other agent CLIs and for services that must never stall, add them to the exemption file.
-- **It shows who uses the memory.** Jobs are grouped by the terminal window of the agent that started them, with its Claude Code task title (titles are read from Terminal.app). Background jobs whose launcher has exited are listed as `detached`.
-- **Only one job is paused at a time.** Several jobs peaking together are time-sliced instead of crashing the machine together.
-- **It never leaves a job frozen.** Stopping the daemon first resumes any job it has paused.
+**Nothing to configure. No changes to your agents.** Install it once and it runs in the background.
 
 ## Install
 
-Requirements: macOS on Apple Silicon. Tested on macOS 26.5 with an M4 Pro.
+1. Download the latest **memguard .dmg** from [Releases](https://github.com/claushorn/memguard/releases).
+2. Open it and double-click **Install memguard**.
+3. Answer the questions. That's it.
 
-**Installer:** download `memguard-<version>.dmg` from [Releases](https://github.com/claushorn/memguard/releases), open it and double-click **Install memguard**. The installer offers to install [uv](https://docs.astral.sh/uv/) if it is missing, starts the watchdog, and asks whether Claude Code agents should receive its warnings. **Uninstall memguard** on the same disk image removes everything.
+Requires a Mac with Apple Silicon (M1 or later). Tested on macOS 26.5.
 
-The app is not notarized yet, so the first time you open it macOS blocks it. Go to **System Settings → Privacy & Security** and click **Open Anyway**.
+## What you'll notice
 
-**From source** (requires [uv](https://docs.astral.sh/uv/)):
+- **Normally, nothing.** memguard uses almost no resources.
+- **When memory gets low,** you get a notification naming the job that uses the most memory.
+- **Your Claude Code agents are told too.** An agent learns that its job is using too much memory and how to reduce it, before anything gets paused. It is also told if its job is paused, resumed or stopped.
+- **If memory stays critical,** the largest job is paused and continues on its own once memory frees up. Your agents themselves are never stopped, only the jobs they started.
 
-```bash
-git clone https://github.com/claushorn/memguard.git
-cd memguard
-tools/install_memwatch.sh            # install and start the launchd agent (survives reboots)
-tools/install_agent_hook.sh          # let Claude Code agents receive memguard's warnings
-launchctl list | grep memwatch       # check that it is running
-tail -f logs/memwatch.log            # see what it does
-```
-
-`install_agent_hook.sh` adds a hook to `~/.claude/settings.json` (a backup is kept as `settings.json.bak`). Running sessions pick it up automatically, with no restart needed. To check, open `/hooks` in a session: **PostToolUse** and **UserPromptSubmit** should list `memguard.agent_hook`.
-
-Uninstall: `tools/install_memwatch.sh --uninstall` and `tools/install_agent_hook.sh --uninstall`.
-
-## Use
-
-```bash
-uv run memguard/memwatch.py                  # which window holds the memory
-uv run memguard/memwatch.py --watch          # the same view, refreshed live
-uv run memguard/memwatch.py --stop ttys012   # pause that window's jobs (reversible)
-uv run memguard/memwatch.py --resume ttys012
-uv run memguard/memwatch.py --kill ttys012   # irreversible
-```
-
-Example report:
-
-```
-FREE 3.1 GB / 24.0 GB   swap 12.3 GB          [SIGSTOP threshold 3.5 GB]
-
-TTY           GB  WINDOW TITLE                             STATE     TOP CHILD
-detached    20.9! DETACHED background jobs (no owning term           boltz  20.7 GB
-ttys024      6.8  Fold candidate binders                             python  6.7 GB
-ttys021      3.9  Train embedding model                              python  3.7 GB
-```
-
-## Configure
-
-Create `~/.config/memguard/exempt` to protect processes. Each line is a substring of a command line; matching processes are never paused or killed:
-
-```
-# ~/.config/memguard/exempt
-redis-server
-my_live_service.py
-/opt/homebrew/bin/codex
-```
-
-The file is read when the daemon starts; restart it with `launchctl kickstart -k gui/$(id -u)/com.memguard.memwatch`.
-
-Environment overrides, set in the launchd plist or the shell:
-
-| Variable | Default |
+| Free memory | What memguard does |
 |---|---|
-| `MEMWATCH_WARN_FREE_GB` / `MEMWATCH_STOP_FREE_GB` / `MEMWATCH_KILL_FREE_GB` | `6` / `3.5` / `2` |
-| `MEMWATCH_RESUME_FREE_GB` | `6` |
-| `MEMWATCH_PROJECT_MARKERS` | `~/code/`. Background jobs whose command line contains this are listed as `detached` |
-| `MEMWATCH_EXEMPT_FILE` | `~/.config/memguard/exempt` |
+| under 6 GB | notifies you |
+| under 3.5 GB | warns the agent, then pauses its job about 30 seconds later |
+| under 2 GB | pauses the largest job immediately; if memory is still critical, stops it |
+| back above 6 GB | resumes the paused job |
 
-## Optional: large-load guard for Python projects
+## Protect important programs
 
-This makes `pd.read_csv` / `pd.read_parquet` / `pq.read_table` refuse to load a multi-GB file whole. The error names the bounded alternative to use instead.
+To make sure a program is never paused, add part of its name to the file `~/.config/memguard/exempt`, one name per line. For example:
 
-```bash
-tools/install_memguard.sh /path/to/project/.venv     # --check / --uninstall
+```
+redis-server
+my_server.py
 ```
 
-To allow a whole-file load that is genuinely needed: `with memguard.full_load_allowed("why", est_gb=4): ...`
+## Why memguard exists
 
-## Development
+It was built after a Mac running several AI agents crashed when memory ran out. Three jobs used about 24 GB between them on a 24 GB machine. Much of what such jobs use is GPU memory, which ordinary tools miss: one job was measured at **20.7 GB** while ordinary tools reported only **7.8 MB**. memguard measures what each job really uses, so it catches exactly this.
 
-```bash
-uv run pytest -q
-```
+## Uninstall
+
+Open the disk image again and double-click **Uninstall memguard**.
 
 ## License
 
