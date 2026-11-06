@@ -55,4 +55,4 @@ Use, modification, and redistribution are permitted for noncommercial purposes u
 
 For commercial licensing inquiries, please contact the copyright holder.
 
-**Team / enterprise licensing:** [contact us](https://github.com/claushorn/memguard/issues/new?title=Team%20%2F%20enterprise%20licensing%20inquiry).
+<!-- **Team / enterprise licensing:** [contact us](https://github.com/claushorn/memguard/issues/new?title=Team%20%2F%20enterprise%20licensing%20inquiry). -->
