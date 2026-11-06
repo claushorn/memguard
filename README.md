@@ -1,46 +1,78 @@
 # memguard
 
-Memory safety for a macOS machine shared by many coding agents. Two independent layers:
+**Keep a Mac with many AI coding agents running from crashing.**
 
-| Layer | What it stops | How |
-|---|---|---|
-| **`memguard/memwatch.py`**: OOM watchdog | Aggregate pressure: many jobs together exhausting RAM and swap until the kernel panics | Samples free memory every 3 s. Under pressure it warns, then `SIGSTOP`s the largest non-exempt process, `SIGCONT`s it when the box drains, and `SIGKILL`s it only if suspension did not help |
-| **`memguard` load guard** (`.pth` in a venv) | A single unbounded `pd.read_csv` / `pd.read_parquet` / `pq.read_table` of a multi-GB file | Refuses the load with a `LargeDataLoadError` that names the bounded alternative |
+When several agents (Claude Code, Codex, Cursor, …) work on one machine, each one starts its own jobs, such as model inference, structure prediction or data processing. No single job has to misbehave: together they use up RAM and swap, macOS stalls, and the kernel watchdog panics the machine. memguard is a small watchdog that prevents this.
 
-## Watchdog
+- **It notices the pressure first.** It samples free memory every 3 s.
+- **It warns the agent responsible.** The warning is printed in that agent's own terminal.
+- **It pauses before it kills.** The largest job is paused with `SIGSTOP` and resumed when memory frees up. It is killed only when free memory reaches the kill threshold.
+- **It sees GPU memory.** It measures each process's real committed footprint. RSS misses Metal/MPS memory: one PyTorch job holding **20.7 GB** showed **7.8 MB** RSS.
+- **It never kills your agent.** The `claude` / agent CLI is never targeted, only its child processes. You can also exempt any service.
+- **It is cheap to run.** A full scan of about 500 processes takes about 2 ms.
 
-```bash
-uv sync
-uv run memguard/memwatch.py            # report: which terminal window holds the memory
-uv run memguard/memwatch.py --watch    # same, refreshed continuously
-tools/install_memwatch.sh              # run permanently as a launchd agent
-tools/install_memwatch.sh --uninstall
-```
+macOS only. Requires [uv](https://docs.astral.sh/uv/).
 
-* **Log:** `logs/memwatch.log`
-* **Stop:** `launchctl unload ~/Library/LaunchAgents/com.memguard.memwatch.plist`. `launchctl stop` does not work, because KeepAlive restarts the agent. On exit the watchdog resumes any process it holds suspended.
-* **Manual control of one window's jobs:** `--stop ttysNNN`, `--resume ttysNNN`, `--kill ttysNNN`.
-* **Thresholds** (GB free, env-overridable): `MEMWATCH_WARN_FREE_GB=6`, `MEMWATCH_STOP_FREE_GB=3.5`, `MEMWATCH_KILL_FREE_GB=2`.
-* **Exemptions:** processes whose command line contains a line of `~/.config/memguard/exempt` are never suspended or killed. The file holds one substring per line, `#` starts a comment, and `MEMWATCH_EXEMPT_FILE` overrides the path. The file is machine-local. If it is missing, nothing is exempt; the daemon prints the list it loaded at startup.
-* **Never targeted:** the `claude` CLI itself. Killing an agent leaves its runaway job running, so only the agent's compute children are targeted.
-* **Detached jobs:** jobs without a terminal are grouped as `detached` when their command line contains `~/code/`. `MEMWATCH_PROJECT_MARKERS` overrides this and takes colon-separated values.
-
-Memory is measured as **committed `phys_footprint`** (via `proc_pid_rusage`) for every process. RSS cannot be used because it does not include Metal/MPS (GPU) memory. Measured examples: a torch job holding a 2 GB MPS tensor showed 0.10 GB RSS, and a `boltz predict` run showed 7.8 MB RSS while holding 20.7 GB.
-
-## Load guard (optional, per project venv)
+## Install
 
 ```bash
-tools/install_memguard.sh /path/to/project/.venv            # arm
-tools/install_memguard.sh /path/to/project/.venv --check
-tools/install_memguard.sh /path/to/project/.venv --uninstall
+git clone https://github.com/claushorn/memguard.git
+cd memguard
+tools/install_memwatch.sh        # installs and starts a launchd agent (survives reboots)
 ```
 
-Opting in to a whole-file read that is genuinely needed:
-`with memguard.full_load_allowed("reason", est_gb=...): ...`.
-Set `MEMGUARD_DISABLED=1` to switch the guard off; `memwatch` reports any process it sees doing so.
+Check that it is running: `launchctl list | grep memwatch`. It logs to `logs/memwatch.log`.
+Uninstall: `tools/install_memwatch.sh --uninstall`.
 
-## Tests
+## Use
+
+```bash
+uv run memguard/memwatch.py              # which terminal window is holding the memory
+uv run memguard/memwatch.py --watch      # the same view, refreshed live
+uv run memguard/memwatch.py --stop ttys012     # pause that window's jobs (reversible)
+uv run memguard/memwatch.py --resume ttys012
+uv run memguard/memwatch.py --kill ttys012     # irreversible
+```
+
+Example report:
+
+```
+FREE 3.1 GB / 24.0 GB   swap 12.3 GB          [SIGSTOP threshold 3.5 GB]
+
+TTY           GB  WINDOW TITLE                             STATE     TOP CHILD
+detached    20.9! DETACHED background jobs (no owning term           boltz  20.7 GB
+ttys024      6.8  Fold candidate binders                             python  6.7 GB
+ttys021      3.9  Train embedding model                              python  3.7 GB
+```
+
+## Configure
+
+| What | How |
+|---|---|
+| Never pause or kill a process | Add a substring of its command line to `~/.config/memguard/exempt`, one per line. The file is read at startup. |
+| Thresholds, in GB free | `MEMWATCH_WARN_FREE_GB=6` · `MEMWATCH_STOP_FREE_GB=3.5` · `MEMWATCH_KILL_FREE_GB=2` · `MEMWATCH_RESUME_FREE_GB=6` |
+| Where agent projects live | `MEMWATCH_PROJECT_MARKERS` (colon-separated, default `~/code/`). Used to group background jobs that have no terminal. |
+
+## Optional: large-load guard for Python projects
+
+This makes `pd.read_csv` / `pd.read_parquet` / `pq.read_table` refuse to load a multi-GB file whole. The error names the bounded alternative to use instead.
+
+```bash
+tools/install_memguard.sh /path/to/project/.venv     # --check / --uninstall
+```
+
+To allow a whole-file load that is genuinely needed: `with memguard.full_load_allowed("why", est_gb=4): ...`
+
+## Development
 
 ```bash
 uv run pytest -q
 ```
+
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0.txt).
+
+Use, modification, and redistribution are permitted for noncommercial purposes under the terms of the license. Commercial use requires separate written permission from the copyright holder.
+
+For commercial licensing inquiries, please contact the copyright holder.

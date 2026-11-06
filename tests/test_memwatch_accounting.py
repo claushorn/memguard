@@ -143,10 +143,10 @@ class TestTitleCleaning:
 
 class TestWatchdogDecisions:
     def test_healthy_box_does_nothing(self):
-        assert decide_action(free_gb=12.0, swap_used_gb=0.0, state=WatchState()) is None
+        assert decide_action(free_gb=12.0, state=WatchState()) is None
 
     def test_warns_before_acting(self):
-        assert decide_action(5.0, 0.0, WatchState()) == "warn"
+        assert decide_action(5.0, WatchState()) == "warn"
 
     def test_warns_the_victim_before_suspending_at_the_stop_threshold(self):
         """The FIRST low-memory sample now warns instead of jumping straight to
@@ -154,19 +154,19 @@ class TestWatchdogDecisions:
         loader) before actually being suspended. The stop/kill mechanism itself is
         unchanged; this is a new step inserted before it.
         """
-        assert decide_action(3.0, 0.0, WatchState()) == "warn_victim"
+        assert decide_action(3.0, WatchState()) == "warn_victim"
 
     def test_waits_out_the_grace_period_after_warning(self):
         """Still critical, already warned, grace not yet elapsed -> do nothing (no
         repeated warnings, no premature stop)."""
         state = WatchState(warned_pid=99, warned_samples=WARN_GRACE_SAMPLES - 2)
-        assert decide_action(3.0, 0.0, state) is None
+        assert decide_action(3.0, state) is None
 
     def test_suspends_once_the_grace_period_elapses(self):
         """Still critical after WARN_GRACE_SAMPLES samples since the warning ->
         proceed to 'stop' exactly as the unmodified code always did."""
         state = WatchState(warned_pid=99, warned_samples=WARN_GRACE_SAMPLES - 1)
-        assert decide_action(3.0, 0.0, state) == "stop"
+        assert decide_action(3.0, state) == "stop"
 
     def test_severe_pressure_bypasses_the_grace_period_entirely(self):
         """The grace period is a courtesy for SHALLOW pressure only. Free memory
@@ -184,32 +184,32 @@ class TestWatchdogDecisions:
         which let a stale warned_pid from an earlier, shallower episode hijack the
         target at exactly the moment size matters most.
         """
-        assert decide_action(0.3, 9.0, WatchState()) == "stop_severe"
+        assert decide_action(0.3, WatchState()) == "stop_severe"
 
     def test_severity_bypass_is_gated_on_free_memory_only_never_swap(self):
         """swap_used_gb is NOT a reliable pressure signal on macOS — it can sit far
-        above KILL_SWAP_GB from ordinary background usage while free memory is
+        above any fixed swap threshold from ordinary background usage while free memory is
         genuinely healthy or only shallowly low. The severity bypass must never
         fire on swap alone, at ANY free-memory level.
 
         Regression for TWO earlier versions, both reproduced against a
-        box's REAL readings (~25-30 GB swap used, 12-15x KILL_SWAP_GB):
-        - First version: the bypass checked KILL_FREE_GB/KILL_SWAP_GB
+        box's REAL readings (~25-30 GB swap used at rest):
+        - First version: the bypass checked free memory OR swap
           unconditionally and would have returned 'stop_severe' even with 12 GB
           genuinely free, purely from swap — then 'kill' on the very next
           sample, looping stop-then-kill on a healthy box.
         - Second version: the bypass added a `free_gb < STOP_FREE_GB` gate but
           KEPT the swap disjunct, which fires on EVERY entry into the stop
-          regime on such a box (swap_used_gb > KILL_SWAP_GB was permanently true
+          regime on such a box (the swap condition was permanently true
           there too) — collapsing the whole feature back to the pre-existing
           immediate-'stop' behavior with the grace period never reachable in
           practice. This is the case that matters most: 3.0 GB free (inside the
           stop regime) with high swap must warn, not bypass.
         """
-        assert decide_action(12.0, 25.0, WatchState()) is None
-        assert decide_action(8.0, 25.0, WatchState()) is None
-        assert decide_action(5.0, 25.0, WatchState()) == "warn"
-        assert decide_action(3.0, 25.0, WatchState()) == "warn_victim", (
+        assert decide_action(12.0, WatchState()) is None
+        assert decide_action(8.0, WatchState()) is None
+        assert decide_action(5.0, WatchState()) == "warn"
+        assert decide_action(3.0, WatchState()) == "warn_victim", (
             "high swap alone, inside the stop regime, must still go through the "
             "grace path — not bypass it"
         )
@@ -222,27 +222,31 @@ class TestWatchdogDecisions:
         that happened to be warned earlier.
         """
         state = WatchState(warned_pid=99, warned_samples=1)
-        assert decide_action(0.3, 9.0, state) == "stop_severe"
+        assert decide_action(0.3, state) == "stop_severe"
 
     def test_does_not_suspend_a_second_process(self):
         """One victim at a time; escalate on that one rather than freezing the box."""
-        assert decide_action(3.0, 0.0, WatchState(stopped_pid=42)) is None
+        assert decide_action(3.0, WatchState(stopped_pid=42)) is None
 
     def test_escalates_to_kill_when_suspension_did_not_help(self):
         """SIGSTOP does not free memory, so the kill escalation is genuinely required."""
-        assert decide_action(1.5, 0.0, WatchState(stopped_pid=42)) == "kill"
+        assert decide_action(1.5, WatchState(stopped_pid=42)) == "kill"
 
-    def test_swap_pressure_also_escalates(self):
-        assert decide_action(4.0, 3.0, WatchState(stopped_pid=42)) == "kill"
+    def test_swap_alone_never_escalates_to_kill(self):
+        """Regression: kill used to fire on `swap used > 2 GB` alone. macOS keeps
+        tens of GB of swap in use at rest, so every suspended victim was killed on
+        the very next sample (observed live: killed at 3.4 and 4.1 GB free). Only
+        free memory under KILL_FREE_GB may escalate."""
+        assert decide_action(4.0, WatchState(stopped_pid=42)) is None
 
     def test_resumes_once_the_box_has_drained(self):
         state = WatchState(stopped_pid=42, recovered_samples=2)
-        assert decide_action(9.0, 0.0, state) == "resume"
+        assert decide_action(9.0, state) == "resume"
 
     def test_does_not_resume_on_a_single_good_sample(self):
         """Resuming on one lucky reading would oscillate."""
         state = WatchState(stopped_pid=42, recovered_samples=0)
-        assert decide_action(9.0, 0.0, state) is None
+        assert decide_action(9.0, state) is None
 
 
 class TestWarnBeforeStop:
@@ -1103,3 +1107,35 @@ class TestVictimSelection:
         """Never sacrifice an exempt service to save the box."""
         procs = [proc(1, rss_gb=9.0, command="python protected_service.py")]
         assert pick_victim(procs) is None
+
+
+class TestSingleDaemonCheck:
+    """Two watchdogs both pick victims and both escalate — but the check must not
+    mistake THIS daemon's own launcher (`uv run ... memwatch.py --daemon`, the parent
+    of the python process under launchd) for a second watchdog. It did: the launchd
+    job refused to start, every 30 s, and never protected anything."""
+
+    PS = (
+        "  100     1 /usr/local/bin/uv run --no-sync memguard/memwatch.py --daemon\n"
+        "  101   100 /x/.venv/bin/python3 memguard/memwatch.py --daemon\n"
+        "  200     1 /usr/local/bin/uv run memguard/memwatch.py --daemon\n"
+        "  201   200 /x/.venv/bin/python3 memguard/memwatch.py --daemon\n"
+        "  300     1 python other.py\n"
+    )
+
+    def _patch(self, monkeypatch, mine):
+        from memguard import memwatch
+
+        class Result:
+            stdout = self.PS
+        monkeypatch.setattr(memwatch.subprocess, "run", lambda *a, **k: Result())
+        monkeypatch.setattr(memwatch.os, "getpid", lambda: mine)
+        return memwatch
+
+    def test_own_launcher_is_not_another_daemon(self, monkeypatch):
+        memwatch = self._patch(monkeypatch, mine=101)
+        assert 100 not in memwatch._other_daemon_pids()
+
+    def test_a_genuinely_separate_daemon_is_still_detected(self, monkeypatch):
+        memwatch = self._patch(monkeypatch, mine=101)
+        assert sorted(memwatch._other_daemon_pids()) == [200, 201]

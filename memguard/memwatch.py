@@ -73,7 +73,6 @@ GB = 1024.0 ** 3
 WARN_FREE_GB = float(os.environ.get("MEMWATCH_WARN_FREE_GB", 6.0))
 STOP_FREE_GB = float(os.environ.get("MEMWATCH_STOP_FREE_GB", 3.5))
 KILL_FREE_GB = float(os.environ.get("MEMWATCH_KILL_FREE_GB", 2.0))
-KILL_SWAP_GB = float(os.environ.get("MEMWATCH_KILL_SWAP_GB", 2.0))
 RESUME_FREE_GB = float(os.environ.get("MEMWATCH_RESUME_FREE_GB", 6.0))
 #: A window at or above this is marked "!" in the report as unusually heavy.
 #:
@@ -451,7 +450,7 @@ class WatchState:
     warn_recovered_samples: int = 0
 
 
-def decide_action(free_gb: float, swap_used_gb: float, state: WatchState) -> Optional[str]:
+def decide_action(free_gb: float, state: WatchState) -> Optional[str]:
     """One of 'warn', 'warn_victim', 'stop', 'stop_severe', 'kill', 'resume', or None.
     No side effects.
 
@@ -465,17 +464,15 @@ def decide_action(free_gb: float, swap_used_gb: float, state: WatchState) -> Opt
     KILL_FREE_GB, waiting out a grace period would leave the box unprotected during a
     genuine OOM cliff, so it bypasses warn_victim entirely.
 
-    DELIBERATELY free_gb ONLY — swap_used_gb does NOT gate the stop decisions. Swap
-    used alone is not a reliable pressure signal on macOS: tens of GB of swap can sit
-    in use from ordinary background activity with plenty of memory free. KNOWN ISSUE:
-    the KILL escalation for an ALREADY-stopped victim still uses the swap term, so on a
-    box whose resting swap exceeds KILL_SWAP_GB, a suspended victim is killed on the
-    next sample.
+    DELIBERATELY free memory ONLY — swap used does not gate any decision. It is not a
+    pressure signal on macOS: tens of GB of swap sit in use from ordinary background
+    activity with plenty of memory free. A swap term in the kill escalation killed
+    every suspended victim on the next sample, at 3-4 GB free.
     """
     if state.stopped_pid is not None:
         if free_gb >= RESUME_FREE_GB and state.recovered_samples + 1 >= RESUME_SAMPLES:
             return "resume"
-        if free_gb < KILL_FREE_GB or swap_used_gb > KILL_SWAP_GB:
+        if free_gb < KILL_FREE_GB:
             return "kill"
         return None
     if free_gb < KILL_FREE_GB:
@@ -604,22 +601,34 @@ def _other_daemon_pids() -> list[int]:
     victim IT suspended, so both can pick victims and both can escalate to SIGKILL,
     and one may resume a process the other is still counting as stopped. Easy to do by
     accident by running it by hand after installing the launchd job.
+
+    This process's own ANCESTORS are excluded: under launchd the daemon runs as
+    `uv run ... memwatch.py --daemon`, whose uv parent carries the same command line.
+    Counting it made the daemon refuse to start, forever.
     """
-    out = subprocess.run(["ps", "-axo", "pid=,command="],
+    out = subprocess.run(["ps", "-axo", "pid=,ppid=,command="],
                          capture_output=True, text=True, timeout=30).stdout
-    mine = os.getpid()
-    pids = []
+    parent_of: dict[int, int] = {}
+    daemons: list[int] = []
     for line in out.splitlines():
-        pid, _, command = line.strip().partition(" ")
-        if "memwatch.py" not in command or "--daemon" not in command:
+        parts = line.split(None, 2)
+        if len(parts) < 3:
             continue
         try:
-            found = int(pid)
+            pid, ppid = int(parts[0]), int(parts[1])
         except ValueError:
             continue
-        if found != mine:
-            pids.append(found)
-    return pids
+        parent_of[pid] = ppid
+        if "memwatch.py" in parts[2] and "--daemon" in parts[2]:
+            daemons.append(pid)
+
+    mine = os.getpid()
+    lineage = {mine}
+    cur = mine
+    while cur in parent_of and parent_of[cur] not in lineage:
+        cur = parent_of[cur]
+        lineage.add(cur)
+    return [pid for pid in daemons if pid not in lineage]
 
 
 def run_daemon(dry_run: bool = False) -> int:
@@ -671,8 +680,8 @@ def run_daemon(dry_run: bool = False) -> int:
     try:
         while True:
             try:
-                free_gb, _total, swap_gb = system_memory()
-                action = decide_action(free_gb, swap_gb, state)
+                free_gb, _total, _swap = system_memory()
+                action = decide_action(free_gb, state)
 
                 if action == "resume":
                     _signal_pid(state.stopped_pid, signal.SIGCONT, "resumed", dry_run)
