@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for the memguard OOM watchdog. Rendered by tools/install_memwatch.sh,
+  which fills in @REPO@ and @UV@ (launchd expands neither ~ nor $VARS).
+
+  Keeps memguard/memwatch.py running in daemon mode permanently. It samples free memory
+  every 3 s and, under pressure, SIGSTOPs the largest non-exempt process (resuming it
+  with SIGCONT once the box drains), escalating to SIGKILL only if suspension did not
+  relieve the pressure. Exemptions: ~/.config/memguard/exempt. The `claude` CLI is
+  never the victim — only its compute children.
+
+  STOP IT:  launchctl unload ~/Library/LaunchAgents/com.memguard.memwatch.plist
+  (`launchctl stop` is NOT enough — KeepAlive restarts it.) The watchdog resumes any
+  process it holds suspended before exiting, so stopping it never strands a frozen job.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.memguard.memwatch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@UV@</string>
+        <string>run</string>
+        <string>--no-sync</string>
+        <string>memguard/memwatch.py</string>
+        <string>--daemon</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>@REPO@</string>
+
+    <!-- Restart if it ever exits: an absent watchdog is silently no protection. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- The watchdog must never itself be a memory or CPU burden. -->
+    <key>Nice</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>@REPO@/logs/memwatch.log</string>
+    <key>StandardErrorPath</key>
+    <string>@REPO@/logs/memwatch.err.log</string>
+</dict>
+</plist>
