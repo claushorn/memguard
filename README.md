@@ -28,7 +28,7 @@ One daemon, launched by launchd, samples free memory every 3 s and reads the mem
 | < 2 GB | **Pause the largest job immediately**. If one is already paused and memory is still under 2 GB, **kill it** |
 | ≥ 6 GB for 3 samples | **Resume** the paused job (`SIGCONT`) |
 
-- **The agent reads the warning.** Claude Code passes its session ID down to every job it starts, even background jobs. memguard uses it to find the agent that owns a job and puts the warning into that agent's context, through a Claude Code hook, at the agent's next tool call or prompt. The agent is told that its job is using a lot of memory, how long it has until the job is paused, and how to reduce it (smaller batch, fewer workers, freeing GPU tensors). It is also told when the job is paused, resumed or killed. This works whether or not the job has a terminal. An agent that is idle, with its turn ended while a background job keeps running, gets the message when it next acts; until then the desktop notification reaches you.
+- **The agent reads the warning.** Claude Code passes its session ID down to every job it starts, even background jobs. memguard uses it to find the agent that owns a job and puts the warning into that agent's context, through a Claude Code hook. The agent is told that its job is using a lot of memory, how long it has until the job is paused, and how to reduce it (smaller batch, fewer workers, freeing GPU tensors). It is also told when the job is paused, resumed or killed. This works whether or not the job has a terminal. An agent that is idle, with its turn ended while a background job keeps running, gets the message when it next acts; until then the desktop notification reaches you.
 - **The agent is never the target.** Killing an agent loses its context and leaves its runaway job running, so memguard targets the agent's child jobs. The `claude` CLI is protected by default. For other agent CLIs and for services that must never stall, add them to the exemption file.
 - **It shows who uses the memory.** Jobs are grouped by the terminal window of the agent that started them, with its Claude Code task title (titles are read from Terminal.app). Background jobs whose launcher has exited are listed as `detached`.
 - **Only one job is paused at a time.** Several jobs peaking together are time-sliced instead of crashing the machine together.
@@ -36,7 +36,13 @@ One daemon, launched by launchd, samples free memory every 3 s and reads the mem
 
 ## Install
 
-Requirements: macOS on Apple Silicon and [uv](https://docs.astral.sh/uv/). Tested on macOS 26.5 with an M4 Pro.
+Requirements: macOS on Apple Silicon. Tested on macOS 26.5 with an M4 Pro.
+
+**Installer:** download `memguard-<version>.dmg` from [Releases](https://github.com/claushorn/memguard/releases), open it and double-click **Install memguard**. The installer offers to install [uv](https://docs.astral.sh/uv/) if it is missing, starts the watchdog, and asks whether Claude Code agents should receive its warnings. **Uninstall memguard** on the same disk image removes everything.
+
+The app is not notarized yet, so the first time you open it macOS blocks it. Go to **System Settings → Privacy & Security** and click **Open Anyway**.
+
+**From source** (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 git clone https://github.com/claushorn/memguard.git
